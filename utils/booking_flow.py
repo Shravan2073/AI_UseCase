@@ -40,7 +40,7 @@ class BookingFlow:
                 self.state["editing_field"] = None
                 self.state["awaiting_confirmation"] = True
                 return False, self.summary_for_confirmation()
-            return False, FIELD_PROMPTS[editing_field]
+            return False, self._invalid_field_message(editing_field)
 
         # Step 2: user said "no" and now must specify which field to edit.
         if self.state.get("awaiting_edit_field_selection"):
@@ -53,13 +53,13 @@ class BookingFlow:
             return False, FIELD_PROMPTS[field]
 
         extracted = extract_fields_from_text(user_text)
+        missing_before = self.get_missing_fields()
         for key, value in extracted.items():
             if key in REQUIRED_FIELDS and validate_field(key, value):
                 self.state["slots"][key] = value
 
         # If extraction did not detect anything, treat the reply as a direct
         # answer to the next missing field (for example, plain full name text).
-        missing_before = self.get_missing_fields()
         if missing_before and not any(k in extracted for k in REQUIRED_FIELDS):
             next_field = missing_before[0]
             candidate = user_text.strip()
@@ -80,6 +80,11 @@ class BookingFlow:
 
         missing = self.get_missing_fields()
         if missing:
+            # User provided input but current slot is still invalid/missing.
+            if missing_before and missing[0] == missing_before[0] and user_text.strip():
+                candidate = extracted.get(missing[0], user_text.strip())
+                if not validate_field(missing[0], candidate):
+                    return False, self._invalid_field_message(missing[0])
             return False, self.ask_next_missing_field()
 
         self.state["awaiting_confirmation"] = True
@@ -136,3 +141,14 @@ class BookingFlow:
             if key in text:
                 return value
         return None
+
+    def _invalid_field_message(self, field: str) -> str:
+        if field == "phone":
+            return "Please enter a valid phone number with 10-15 digits (for example: +919876543210)."
+        if field == "email":
+            return "Please enter a valid email address (for example: name@example.com)."
+        if field == "date":
+            return "Please enter the date in YYYY-MM-DD format (for example: 2026-04-03)."
+        if field == "time":
+            return "Please enter the time in 24-hour HH:MM format (for example: 14:30)."
+        return FIELD_PROMPTS.get(field, "Please provide a valid value.")
