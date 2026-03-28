@@ -20,16 +20,53 @@ class BookingFlow:
         self.state.setdefault("slots", {})
         self.state.setdefault("awaiting_confirmation", False)
         self.state.setdefault("active", False)
+        self.state.setdefault("awaiting_edit_field_selection", False)
+        self.state.setdefault("editing_field", None)
 
     def start(self) -> str:
         self.state["active"] = True
         return "Sure, I can help with a booking. " + self.ask_next_missing_field()
 
     def update_from_user(self, user_text: str) -> Tuple[bool, str]:
+        # Step 1: user selected a field to edit and now must provide new value.
+        if self.state.get("editing_field"):
+            editing_field = self.state["editing_field"]
+            extracted = extract_fields_from_text(user_text)
+            candidate = extracted.get(editing_field, user_text.strip())
+            if validate_field(editing_field, candidate):
+                if editing_field in {"name", "booking_type"}:
+                    candidate = candidate.title()
+                self.state["slots"][editing_field] = candidate
+                self.state["editing_field"] = None
+                self.state["awaiting_confirmation"] = True
+                return False, self.summary_for_confirmation()
+            return False, FIELD_PROMPTS[editing_field]
+
+        # Step 2: user said "no" and now must specify which field to edit.
+        if self.state.get("awaiting_edit_field_selection"):
+            field = self._resolve_field_name(user_text)
+            if field is None:
+                valid = ", ".join(REQUIRED_FIELDS)
+                return False, f"Please choose a valid field to update: {valid}."
+            self.state["awaiting_edit_field_selection"] = False
+            self.state["editing_field"] = field
+            return False, FIELD_PROMPTS[field]
+
         extracted = extract_fields_from_text(user_text)
         for key, value in extracted.items():
             if key in REQUIRED_FIELDS and validate_field(key, value):
                 self.state["slots"][key] = value
+
+        # If extraction did not detect anything, treat the reply as a direct
+        # answer to the next missing field (for example, plain full name text).
+        missing_before = self.get_missing_fields()
+        if missing_before and not any(k in extracted for k in REQUIRED_FIELDS):
+            next_field = missing_before[0]
+            candidate = user_text.strip()
+            if validate_field(next_field, candidate):
+                if next_field in {"name", "booking_type"}:
+                    candidate = candidate.title()
+                self.state["slots"][next_field] = candidate
 
         if self.state.get("awaiting_confirmation"):
             lower = user_text.strip().lower()
@@ -37,6 +74,7 @@ class BookingFlow:
                 return True, "confirmed"
             if lower in {"no", "n", "change", "edit"}:
                 self.state["awaiting_confirmation"] = False
+                self.state["awaiting_edit_field_selection"] = True
                 return False, "No problem. Tell me the field you want to update."
             return False, "Please type 'confirm' to proceed or 'no' to modify details."
 
@@ -72,4 +110,29 @@ class BookingFlow:
     def reset(self) -> None:
         self.state["active"] = False
         self.state["awaiting_confirmation"] = False
+        self.state["awaiting_edit_field_selection"] = False
+        self.state["editing_field"] = None
         self.state["slots"] = {}
+
+    def _resolve_field_name(self, user_text: str):
+        text = user_text.strip().lower()
+        mapping = {
+            "name": "name",
+            "full name": "name",
+            "email": "email",
+            "mail": "email",
+            "phone": "phone",
+            "mobile": "phone",
+            "booking": "booking_type",
+            "booking type": "booking_type",
+            "service": "booking_type",
+            "type": "booking_type",
+            "date": "date",
+            "time": "time",
+        }
+        if text in mapping:
+            return mapping[text]
+        for key, value in mapping.items():
+            if key in text:
+                return value
+        return None

@@ -37,7 +37,7 @@ class AppConfig:
 def load_config() -> AppConfig:
 	return AppConfig(
 		groq_api_key=_get_setting("GROQ_API_KEY", ""),
-		groq_model=_get_setting("GROQ_MODEL", "llama-3.1-70b-versatile"),
+		groq_model=_get_setting("GROQ_MODEL", "llama-3.3-70b-versatile"),
 		smtp_host=_get_setting("SMTP_HOST", "smtp.gmail.com"),
 		smtp_port=int(_get_setting("SMTP_PORT", "587")),
 		smtp_user=_get_setting("SMTP_USER", ""),

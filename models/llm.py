@@ -2,11 +2,21 @@ import os
 import sys
 from typing import List, Optional
 
-from groq import Groq
+from groq import BadRequestError, Groq
 
 from config.config import load_config
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
+FALLBACK_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+]
+
+
+def _candidate_models(primary: str) -> List[str]:
+    ordered = [primary] + [m for m in FALLBACK_MODELS if m != primary]
+    return ordered
 
 
 def get_chatgroq_model():
@@ -50,9 +60,28 @@ def generate_response(
         )
     messages.append({"role": "user", "content": final_prompt})
 
-    response = model["client"].chat.completions.create(
-        model=model["model"],
-        messages=messages,
-        temperature=0.2,
+    last_error = None
+    for model_name in _candidate_models(model["model"]):
+        try:
+            response = model["client"].chat.completions.create(
+                model=model_name,
+                messages=messages,
+                temperature=0.2,
+            )
+            if model_name != model["model"]:
+                model["model"] = model_name
+            return response.choices[0].message.content or ""
+        except BadRequestError as exc:
+            last_error = exc
+            err = getattr(exc, "body", {}) or {}
+            code = (err.get("error") or {}).get("code")
+            if code == "model_decommissioned":
+                continue
+            return f"LLM request failed: {exc}"
+        except Exception as exc:
+            return f"LLM request failed: {exc}"
+
+    return (
+        "The configured model is unavailable. "
+        "Update GROQ_MODEL to a supported model (for example, llama-3.3-70b-versatile)."
     )
-    return response.choices[0].message.content or ""

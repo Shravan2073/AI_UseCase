@@ -28,9 +28,15 @@ def extract_fields_from_text(user_text: str) -> Dict[str, str]:
     if email_match:
         fields["email"] = email_match.group(0)
 
-    phone_match = re.search(r"(?:\+?\d[\d\-\s]{8,}\d)", text)
-    if phone_match:
-        fields["phone"] = re.sub(r"\s+", "", phone_match.group(0))
+    phone_candidates = re.findall(r"(?:\+?\d[\d\-\s()]{8,}\d)", text)
+    for cand in phone_candidates:
+        stripped = cand.strip()
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", stripped):
+            continue
+        digits = re.sub(r"\D", "", stripped)
+        if 10 <= len(digits) <= 15:
+            fields["phone"] = re.sub(r"\s+", "", stripped)
+            break
 
     date_match = re.search(r"\b\d{4}-\d{2}-\d{2}\b", text)
     if date_match:
@@ -74,6 +80,11 @@ def validate_field(field: str, value: str) -> bool:
             return True
         except ValueError:
             return False
+    if field == "phone":
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value.strip()):
+            return False
+        digits = re.sub(r"\D", "", value)
+        return 10 <= len(digits) <= 15
     if field == "time":
         try:
             datetime.strptime(value, "%H:%M")
